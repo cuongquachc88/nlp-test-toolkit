@@ -5,6 +5,7 @@
 import { createClient, Client as LibsqlClient } from '@libsql/client';
 import path from 'path';
 import fs from 'fs';
+import { debug } from '@/utils/debug';
 
 const DB_PATH = process.env.DATABASE_PATH || './data/llmtestkit.db';
 
@@ -92,7 +93,7 @@ async function createTables(db: Database): Promise<void> {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_test_executions_status ON test_executions(status)`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)`);
 
-  console.log('Database tables created successfully');
+  debug.info('db', 'Database tables created successfully');
 }
 
 // Singleton database instance

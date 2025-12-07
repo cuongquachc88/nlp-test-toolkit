@@ -7,6 +7,7 @@ import express from 'express';
 import type { ChatRequest, ChatResponse } from '@shared/types';
 import { NLPParser } from '@/nlp/parser';
 import { chatService } from '@/services/chat.service';
+import { debug } from '@/utils/debug';
 
 const router: express.Router = express.Router();
 const parser = new NLPParser();
@@ -14,9 +15,8 @@ const parser = new NLPParser();
 // POST /api/chat - Send chat message
 router.post('/', async (req, res) => {
     try {
-        console.log('\n=== CHAT REQUEST RECEIVED ===');
-        console.log('Body:', JSON.stringify(req.body));
-        console.log('============================\n');
+        debug.section('api', 'CHAT REQUEST RECEIVED');
+        debug.logObject('api', 'Request Body', req.body, 'debug');
 
         const request: ChatRequest = req.body;
 
@@ -26,13 +26,14 @@ router.post('/', async (req, res) => {
 
         // 1. Get or create session
         const session = await chatService.getOrCreateSession(request.sessionId);
-        console.log(`[Chat] Using session: ${session.id}`);
+        debug.info('chat', `Using session: ${session.id}`);
 
         // 2. Save user message
         await chatService.saveMessage(session.id, 'user', request.message);
 
         // 3. Get model from environment or use default
         const model = process.env.OPENAI_MODEL || 'gpt-4';
+        debug.info('chat', `Using model: ${model}`);
 
         // 4. Calculate token counts for context window
         const systemPromptTokens = chatService.countTokens(
@@ -54,10 +55,9 @@ router.post('/', async (req, res) => {
             content: string;
         }>;
 
-        console.log(`[Chat] Using model: ${model}`);
-        console.log(`[Chat] Retrieved ${conversationHistory.length} messages from history`);
+        debug.info('chat', `Retrieved ${conversationHistory.length} messages from history`);
 
-        console.log('Parsing message:', request.message);
+        debug.info('chat', `Parsing message: ${request.message}`);
 
         // 6. Parse the message using NLP with conversation history
         const result = await parser.parse(request.message, {
@@ -65,46 +65,43 @@ router.post('/', async (req, res) => {
             conversationHistory  // Pass history to parser
         });
 
-        console.log('\n=== PARSE RESULT ===');
-        console.log('Commands count:', result.commands.length);
-        console.log('Confidence:', result.confidence);
-        console.log('Tokens used:', result.tokensUsed || 'N/A');
-        console.log('Cost:', result.cost ? `$${result.cost.toFixed(4)}` : 'N/A');
+        // Log parse result for debugging
+        debug.section('nlp', 'PARSE RESULT');
+        debug.info('nlp', `Commands: ${result.commands?.length || 0}`);
+        debug.info('nlp', `Confidence: ${result.confidence}`);
+        debug.debug('nlp', `Tokens Used: ${result.tokensUsed}`);
+        debug.debug('cost', `Cost: $${result.cost?.toFixed(6)}`);
+        debug.logObject('nlp', 'Raw Response', result.rawResponse, 'debug');
 
         // Check if there's an error message from LLM (for vague requests)
         const parsedResponse = result.rawResponse ? JSON.parse(result.rawResponse) : null;
         if (parsedResponse?.error) {
-            console.log('⚠️  LLM returned error:', parsedResponse.error);
-        }
 
-        console.log('Full result:', JSON.stringify(result, null, 2));
-        console.log('====================\n');
+            // Priority 1: Check if LLM returned structured questionnaire
+            if (result.questionnaire && result.commands.length === 0) {
+                debug.info('chat', '📋 Returning structured questionnaire to frontend');
 
-        // Priority 1: Check if LLM returned structured questionnaire
-        if (result.questionnaire && result.commands.length === 0) {
-            console.log('📋 Returning structured questionnaire to frontend');
+                // Save assistant response with questionnaire
+                await chatService.saveMessage(
+                    session.id,
+                    'assistant',
+                    result.questionnaire.message
+                );
 
-            // Save assistant response with questionnaire
-            await chatService.saveMessage(
-                session.id,
-                'assistant',
-                result.questionnaire.message
-            );
+                const response: ChatResponse = {
+                    messageId: Date.now().toString(),
+                    content: result.questionnaire.message,
+                    commands: [],
+                    questionnaire: result.questionnaire,  // Pass questionnaire to frontend
+                    sessionId: session.id,
+                };
+                return res.json(response);
+            }
 
-            const response: ChatResponse = {
-                messageId: Date.now().toString(),
-                content: result.questionnaire.message,
-                commands: [],
-                questionnaire: result.questionnaire,  // Pass questionnaire to frontend
-                sessionId: session.id,
-            };
-            return res.json(response);
-        }
-
-        // Priority 2: Check for error message (legacy fallback)
-        if (parsedResponse?.error && result.commands.length === 0) {
-            // Format error as a structured questionnaire (fallback for old-style responses)
-            const questionnaireContent = `⚠️ **Your request needs more details**
+            // Priority 2: Check for error message (legacy fallback)
+            if (parsedResponse?.error && result.commands.length === 0) {
+                // Format error as a structured questionnaire (fallback for old-style responses)
+                const questionnaireContent = `⚠️ **Your request needs more details**
 
 I need specific information to generate reliable test commands. Please answer these questions:
 
@@ -178,19 +175,20 @@ Verify URL contains "/blog"
 
 **Confidence:** ${(result.confidence * 100).toFixed(0)}%`;
 
-            // Save assistant response
-            await chatService.saveMessage(session.id, 'assistant', questionnaireContent);
+                // Save assistant response
+                await chatService.saveMessage(session.id, 'assistant', questionnaireContent);
 
-            const response: ChatResponse = {
-                messageId: Date.now().toString(),
-                content: questionnaireContent,
-                commands: [],
-                sessionId: session.id,
-            };
-            return res.json(response);
+                const response: ChatResponse = {
+                    messageId: Date.now().toString(),
+                    content: questionnaireContent,
+                    commands: [],
+                    sessionId: session.id,
+                };
+                return res.json(response);
+            }
         }
 
-        // Generate Playwright code
+        // Success path: Generate Playwright code
         const generatedCode = parser.generatePlaywrightCode(result.commands, {
             testName: 'Generated Test',
             imports: true,
@@ -211,7 +209,7 @@ Verify URL contains "/blog"
 
         return res.json(response);
     } catch (error) {
-        console.error('Chat error:', error);
+        debug.error('api', `Chat error: ${error instanceof Error ? error.message : 'Unknown error'}`);
         return res.status(500).json({
             error: 'Failed to process message',
             details: error instanceof Error ? error.message : 'Unknown error'

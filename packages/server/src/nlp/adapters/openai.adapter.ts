@@ -9,6 +9,7 @@ import type {
     ParseContext,
     ParseResult,
 } from '@shared/types';
+import { debug } from '@/utils/debug';
 
 export class OpenAIAdapter extends BaseLLMAdapter {
     readonly name = 'openai';
@@ -33,13 +34,13 @@ export class OpenAIAdapter extends BaseLLMAdapter {
             return true;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`OpenAI health check failed:`, errorMessage);
+            debug.error('llm', `OpenAI health check failed: ${errorMessage}`);
             return false;
         }
     }
 
     async parse(input: string, context?: ParseContext): Promise<ParseResult> {
-        console.log('🤖 [OpenAI Adapter] Using model:', this.model);
+        debug.info('llm', `🤖 Using model: ${this.model}`);
         try {
             const systemPrompt = this.buildSystemPrompt();
             const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -51,7 +52,7 @@ export class OpenAIAdapter extends BaseLLMAdapter {
 
             // Add conversation history if provided
             if (context?.conversationHistory && context.conversationHistory.length > 0) {
-                console.log('[OpenAI] Adding conversation history:', context.conversationHistory.length, 'messages');
+                debug.verbose('llm', `Adding conversation history: ${context.conversationHistory.length} messages`);
                 messages.push(...context.conversationHistory as OpenAI.Chat.ChatCompletionMessageParam[]);
             }
 
@@ -62,19 +63,17 @@ export class OpenAIAdapter extends BaseLLMAdapter {
             });
 
             // Debug: Log full prompt being sent to LLM
-            console.log('\n=== FULL PROMPT TO LLM ===');
-            console.log('System Prompt:');
-            console.log(systemPrompt);
-            console.log('\nMessages:');
-            console.log(JSON.stringify(messages, null, 2));
-            console.log('===========================\n');
+            debug.section('llm', 'FULL PROMPT TO LLM');
+            debug.verbose('llm', 'System Prompt:');
+            debug.verbose('llm', systemPrompt);
+            debug.logObject('llm', 'Messages', messages, 'debug');
 
             // Estimate cost before sending
             const estimatedInputTokens = Math.ceil(
                 (systemPrompt.length + input.length) / 4
             );
             const estimatedCost = this.calculateCost(estimatedInputTokens);
-            console.log(`[Cost Estimate] ~${estimatedInputTokens} input tokens, ~$${estimatedCost.toFixed(4)} USD`);
+            debug.debug('cost', `~${estimatedInputTokens} input tokens, ~$${estimatedCost.toFixed(4)} USD`);
 
             const response = await this.client.chat.completions.create({
                 model: this.model,
@@ -87,15 +86,14 @@ export class OpenAIAdapter extends BaseLLMAdapter {
             const rawResponse = response.choices[0].message.content || '{}';
 
             // Debug: Log LLM response and actual usage
-            console.log('\n=== LLM RESPONSE ===');
-            console.log(rawResponse);
-            console.log('\n=== TOKEN USAGE ===');
-            console.log(`Prompt tokens: ${response.usage?.prompt_tokens || 0}`);
-            console.log(`Completion tokens: ${response.usage?.completion_tokens || 0}`);
-            console.log(`Total tokens: ${response.usage?.total_tokens || 0}`);
+            debug.section('llm', 'LLM RESPONSE');
+            debug.verbose('llm', rawResponse);
+            debug.section('llm', 'TOKEN USAGE');
+            debug.info('cost', `Prompt tokens: ${response.usage?.prompt_tokens || 0}`);
+            debug.info('cost', `Completion tokens: ${response.usage?.completion_tokens || 0}`);
+            debug.info('cost', `Total tokens: ${response.usage?.total_tokens || 0}`);
             const actualCost = this.calculateCost(response.usage?.total_tokens || 0);
-            console.log(`Actual cost: $${actualCost.toFixed(4)} USD`);
-            console.log('====================\n');
+            debug.info('cost', `Actual cost: $${actualCost.toFixed(4)} USD`);
 
             const result = this.parseResponse(rawResponse);
 

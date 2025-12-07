@@ -13,16 +13,16 @@ import { GeminiAdapter } from './gemini.adapter';
 import { GLMAdapter } from './glm.adapter';
 import { OpenRouterAdapter } from './openrouter.adapter';
 import { AgentRouterAdapter } from './agentrouter.adapter';
+import { debug } from '@/utils/debug';
 
 export class AdapterFactory {
     private adapters: Map<string, LLMAdapter> = new Map();
     private config: AdapterConfig;
 
     constructor(config: AdapterConfig) {
-        console.log('\n=== ADAPTER FACTORY INIT ===');
-        console.log('Primary provider:', config.primaryProvider);
-        console.log('Fallback providers:', config.fallbackProviders?.join(', ') || 'None');
-        console.log('============================\n');
+        debug.section('llm', 'ADAPTER FACTORY INIT');
+        debug.info('llm', `Primary provider: ${config.primaryProvider}`);
+        debug.info('llm', `Fallback providers: ${config.fallbackProviders?.join(', ') || 'None'}`);
 
         this.config = config;
         this.registerAdapters();
@@ -43,20 +43,19 @@ export class AdapterFactory {
      * Get primary adapter with automatic fallback support
      */
     async getPrimaryAdapter(): Promise<LLMAdapter> {
-        console.log('\n=== GETTING PRIMARY ADAPTER ===');
-        console.log('Using provider:', this.config.primaryProvider);
+        debug.section('llm', 'GETTING PRIMARY ADAPTER');
+        debug.info('llm', `Using provider: ${this.config.primaryProvider}`);
 
         // Try primary provider
         const primary = this.getAdapter(this.config.primaryProvider);
         const isPrimaryHealthy = await primary.healthCheck();
 
         if (isPrimaryHealthy) {
-            console.log('Primary provider is healthy');
-            console.log('================================\n');
+            debug.info('llm', 'Primary provider is healthy');
             return primary;
         }
 
-        console.warn(`Primary provider '${this.config.primaryProvider}' is unhealthy, trying fallbacks...`);
+        debug.warn('llm', `Primary provider '${this.config.primaryProvider}' is unhealthy, trying fallbacks...`);
 
         // Try fallback providers in order
         for (const fallbackName of this.config.fallbackProviders) {
@@ -65,19 +64,17 @@ export class AdapterFactory {
                 const isFallbackHealthy = await fallback.healthCheck();
 
                 if (isFallbackHealthy) {
-                    console.info(`Using fallback provider: ${fallbackName}`);
-                    console.log('================================\n');
+                    debug.info('llm', `Using fallback provider: ${fallbackName}`);
                     return fallback;
                 }
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                console.warn(`Fallback provider '${fallbackName}' failed: ${errorMessage}`);
+                debug.warn('llm', `Fallback provider '${fallbackName}' failed: ${errorMessage}`);
             }
         }
 
         // If all fallbacks fail, return primary anyway and let it error properly
-        console.error('All LLM providers are unhealthy, using primary provider anyway');
-        console.log('================================\n');
+        debug.error('llm', 'All LLM providers are unhealthy, using primary provider anyway');
         return primary;
     }
 
@@ -87,30 +84,30 @@ export class AdapterFactory {
     private registerAdapters(): void {
         const { providers } = this.config;
 
-        console.log('\n=== REGISTERING ADAPTERS ===');
+        debug.section('llm', 'REGISTERING ADAPTERS');
 
         if (providers.openai) {
-            console.log('Registering OpenAI adapter');
+            debug.verbose('llm', 'Registering OpenAI adapter');
             this.adapters.set('openai', new OpenAIAdapter(providers.openai));
         }
 
         if (providers.gemini) {
-            console.log('Registering Gemini adapter');
+            debug.verbose('llm', 'Registering Gemini adapter');
             this.adapters.set('gemini', new GeminiAdapter(providers.gemini));
         }
 
         if (providers.glm) {
-            console.log('Registering GLM adapter');
+            debug.verbose('llm', 'Registering GLM adapter');
             this.adapters.set('glm', new GLMAdapter(providers.glm));
         }
 
         if (providers.openrouter) {
-            console.log('Registering OpenRouter adapter');
+            debug.verbose('llm', 'Registering OpenRouter adapter');
             this.adapters.set('openrouter', new OpenRouterAdapter(providers.openrouter));
         }
 
         if (providers.agentrouter) {
-            console.log('Registering AgentRouter adapter');
+            debug.verbose('llm', 'Registering AgentRouter adapter');
             this.adapters.set('agentrouter', new AgentRouterAdapter(providers.agentrouter));
         }
 
@@ -122,8 +119,7 @@ export class AdapterFactory {
             );
         }
 
-        console.info(`Registered ${this.adapters.size} LLM adapters: ${Array.from(this.adapters.keys()).join(', ')}`);
-        console.log('============================\n');
+        debug.info('llm', `Registered ${this.adapters.size} LLM adapters: ${Array.from(this.adapters.keys()).join(', ')}`);
     }
 
     /**

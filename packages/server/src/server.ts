@@ -9,6 +9,7 @@ import { initializeDatabase } from './database/schema';
 import chatRouter from './api/chat';
 import suitesRouter from './api/suites';
 import executionRouter from './api/execution';
+import { debug } from './utils/debug';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,9 +20,9 @@ app.use(express.json());
 
 // Initialize database
 initializeDatabase().then(() => {
-    console.log('✅ Database initialized successfully');
+    debug.info('server', '✅ Database initialized successfully');
 }).catch(err => {
-    console.error('❌ Database initialization failed:', err);
+    debug.error('server', `❌ Database initialization failed: ${err.message}`);
 });
 
 // Health check endpoint
@@ -43,8 +44,8 @@ app.get('/api/status', (_req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📊 Health check: http://localhost:${PORT}/health`);
-    console.log(`🔌 API status: http://localhost:${PORT}/api/status`);
-    console.log(`💬 Chat API: http://localhost:${PORT}/api/chat`);
+    debug.info('server', `🚀 Server running on http://localhost:${PORT}`);
+    debug.info('server', `📊 Health check: http://localhost:${PORT}/health`);
+    debug.info('server', `🔌 API status: http://localhost:${PORT}/api/status`);
+    debug.info('server', `💬 Chat API: http://localhost:${PORT}/api/chat`);
 });

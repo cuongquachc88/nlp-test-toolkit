@@ -6,6 +6,7 @@
 import type { ParseContext, ParseResult, PlaywrightCommand } from '@shared/types';
 import { AdapterFactory } from './adapters/factory';
 import { loadAdapterConfig } from '@/utils/config';
+import { debug } from '@/utils/debug';
 
 export class NLPParser {
     private factory: AdapterFactory;
@@ -23,9 +24,8 @@ export class NLPParser {
         const adapter = await this.factory.getPrimaryAdapter();
 
         // Debug: Log user input
-        console.log('\n=== USER INPUT TO LLM ===');
-        console.log(userInput);
-        console.log('=========================\n');
+        debug.section('nlp', 'USER INPUT TO LLM');
+        debug.info('nlp', userInput);
 
         // Skip DOM fetching for SEO/performance/accessibility tests (DOM context not useful)
         const skipDOMKeywords = ['seo', 'performance', 'accessibility', 'lighthouse', 'pagespeed', 'meta tag', 'schema'];
@@ -37,7 +37,7 @@ export class NLPParser {
         const urlMatch = userInput.match(/https?:\/\/[^\s]+/);
         if (urlMatch && !shouldSkipDOM) {
             const url = urlMatch[0];
-            console.log(`[Parser] Detected URL: ${url}, fetching DOM info...`);
+            debug.info('dom', `Detected URL: ${url}, fetching DOM info...`);
 
             const { domFetcher } = await import('@/services/dom-fetcher');
             const domInfo = await domFetcher.getDOMInfo(url);
@@ -47,7 +47,7 @@ export class NLPParser {
                 const domContext = domFetcher.formatForLLM(domInfo);
                 const enhancedInput = `${userInput}\n[Context: ${domContext}]`;
 
-                console.log('[Parser] Enhanced with DOM context');
+                debug.info('dom', 'Enhanced with DOM context');
                 const result = await adapter.parse(enhancedInput, context);
                 this.validateCommands(result.commands);
                 return result;
