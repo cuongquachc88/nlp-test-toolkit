@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChat } from '@/hooks/useChat';
-import type { PlaywrightCommand } from '@shared/types';
+import type { PlaywrightCommand, CommandExecutionResult } from '@shared/types';
 import { CommandList } from '@/components/CommandList';
+import { DynamicQuestionnaire } from '@/components/DynamicQuestionnaire';
+import { InteractiveQuestionnaire } from '@/components/InteractiveQuestionnaire';
 import { apiClient } from '@/services/api';
 import ReactMarkdown from 'react-markdown';
 
@@ -10,6 +12,18 @@ import ReactMarkdown from 'react-markdown';
 type ViewMode = 'visual' | 'code';
 
 // Helper function to extract URL from user messages
+function extractUrlFromMessages(messages: any[]): string | undefined {
+    // Find the last user message that contains a URL
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+            const urlMatch = messages[i].content.match(/https?:\/\/[^\s]+/);
+            if (urlMatch) {
+                return urlMatch[0];
+            }
+        }
+    }
+    return undefined;
+}
 
 
 function generateCodePreview(commands: PlaywrightCommand[]): string {
@@ -67,6 +81,7 @@ export default function CreateTest() {
 
     // Execution state
     const [isExecuting, setIsExecuting] = useState(false);
+    const [executionResultsMap, setExecutionResultsMap] = useState<Map<number, CommandExecutionResult>>(new Map());
 
     // Command manipulation handlers
     const handleEditCommand = (index: number, command: PlaywrightCommand) => {
@@ -106,17 +121,29 @@ export default function CreateTest() {
         }
 
         setIsExecuting(true);
+        const newResults = new Map<number, CommandExecutionResult>();
 
-        // Execute commands sequentially - this will trigger individual CommandCard executions
+        // Execute commands sequentially
         for (let i = 0; i < generatedCommands.length; i++) {
             const command = generatedCommands[i];
+            const startTime = Date.now();
             try {
-                // Call the command execute handler which updates the card's internal state
-                await handleExecuteCommand(i, command);
+                const result = await apiClient.executeCommand(command);
+                newResults.set(i, {
+                    ...result,
+                    duration: Date.now() - startTime
+                });
+                // Update state incrementally so user sees progress
+                setExecutionResultsMap(new Map(newResults));
                 // Small delay between executions for visual feedback
                 await new Promise(resolve => setTimeout(resolve, 300));
             } catch (error) {
-                console.error(`Command ${i + 1} failed:`, error);
+                newResults.set(i, {
+                    success: false,
+                    error: error instanceof Error ? error.message : 'Execution failed',
+                    duration: Date.now() - startTime
+                });
+                setExecutionResultsMap(new Map(newResults));
                 // Continue to next command even if this one fails
             }
         }
@@ -225,87 +252,104 @@ export default function CreateTest() {
                                 <p className="text-xs">Example: "Go to google.com and search for playwright"</p>
                             </div>
                         )}
-                        {messages.map((message, index) => (
-                            <div
-                                key={index}
-                                className={`p-2 rounded-lg text-sm ${message.role === 'user'
-                                    ? 'bg-primary-600 text-white ml-8'
-                                    : 'bg-gray-700 text-gray-100 mr-8'
-                                    }`}
-                            >
-                                {message.role === 'assistant' ? (
-                                    <div>
-                                        {message.commands && message.commands.length > 0 ? (
-                                            <div>
-                                                <p className="font-medium mb-1">
-                                                    ✨ Got it! I've added {message.commands.length} test step{message.commands.length !== 1 ? 's' : ''}:
-                                                </p>
-                                                <ul className="text-xs space-y-0.5 ml-4">
-                                                    {message.commands.map((cmd, i) => (
-                                                        <li key={i}>• {cmd.description || cmd.type}</li>
-                                                    ))}
-                                                </ul>
-                                                <p className="text-xs mt-2 text-gray-400">
-                                                    Check the preview on the right →
-                                                </p>
-                                            </div>
-                                        ) : message.questionnaire || message.content.includes('Your request needs more details') ? (
-                                            // Show questionnaire message
-                                            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-3">
-                                                <p className="text-sm text-yellow-200">{message.content}</p>
-                                            </div>
-                                        ) : (
-                                            // Priority 3: Show markdown for normal messages
-                                            <ReactMarkdown
-                                                className="prose prose-sm prose-invert max-w-none"
-                                                components={{
-                                                    h3: ({ node, ...props }) => <h3 className="text-sm font-bold mt-3 mb-2 text-white" {...props} />,
-                                                    h4: ({ node, ...props }) => <h4 className="text-xs font-semibold mt-2 mb-1 text-gray-200" {...props} />,
-                                                    p: ({ node, ...props }) => <p className="mb-2 leading-relaxed" {...props} />,
-                                                    ul: ({ node, ...props }) => <ul className="mb-2 space-y-1" {...props} />,
-                                                    li: ({ node, children, ...props }) => {
-                                                        const content = String(children);
-                                                        // Check if it's a checkbox item
-                                                        if (content.trim().match(/^\[ \]|^\[x\]/)) {
-                                                            const isChecked = content.trim().startsWith('[x]');
-                                                            const text = content.replace(/^\[[ x]\]\s*/, '');
-                                                            return (
-                                                                <li className="flex items-start gap-2" {...props}>
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isChecked}
-                                                                        disabled
-                                                                        className="mt-0.5 flex-shrink-0"
-                                                                    />
-                                                                    <span className="flex-1">{text}</span>
-                                                                </li>
+                        {messages.map((message, index) => {
+                            const extractedUrl = extractUrlFromMessages(messages);
+                            return (
+                                <div
+                                    key={index}
+                                    className={`p-2 rounded-lg text-sm ${message.role === 'user'
+                                        ? 'bg-primary-600 text-white ml-8'
+                                        : 'bg-gray-700 text-gray-100 mr-8'
+                                        }`}
+                                >
+                                    {message.role === 'assistant' ? (
+                                        <div>
+                                            {message.commands && message.commands.length > 0 ? (
+                                                <div>
+                                                    <p className="font-medium mb-1">
+                                                        ✨ Got it! I've added {message.commands.length} test step{message.commands.length !== 1 ? 's' : ''}:
+                                                    </p>
+                                                    <ul className="text-xs space-y-0.5 ml-4">
+                                                        {message.commands.map((cmd, i) => (
+                                                            <li key={i}>• {cmd.description || cmd.type}</li>
+                                                        ))}
+                                                    </ul>
+                                                    <p className="text-xs mt-2 text-gray-400">
+                                                        Check the preview on the right →
+                                                    </p>
+                                                </div>
+                                            ) : message.questionnaire ? (
+                                                // Priority 1: Show dynamic questionnaire if LLM returned structured questionnaire
+                                                <DynamicQuestionnaire
+                                                    questionnaire={message.questionnaire}
+                                                    url={extractedUrl}
+                                                    onSubmit={(refinedPrompt: string) => {
+                                                        // Auto-send the refined prompt
+                                                        sendMessage(refinedPrompt);
+                                                    }}
+                                                />
+                                            ) : message.content.includes('Your request needs more details') ? (
+                                                // Priority 2: Show static interactive questionnaire for legacy error messages
+                                                <InteractiveQuestionnaire
+                                                    url={extractedUrl}
+                                                    onSubmit={(refinedPrompt: string) => {
+                                                        // Auto-send the refined prompt
+                                                        sendMessage(refinedPrompt);
+                                                    }}
+                                                />
+                                            ) : (
+                                                // Priority 3: Show markdown for normal messages
+                                                <ReactMarkdown
+                                                    className="prose prose-sm prose-invert max-w-none"
+                                                    components={{
+                                                        h3: ({ node, ...props }) => <h3 className="text-sm font-bold mt-3 mb-2 text-white" {...props} />,
+                                                        h4: ({ node, ...props }) => <h4 className="text-xs font-semibold mt-2 mb-1 text-gray-200" {...props} />,
+                                                        p: ({ node, ...props }) => <p className="mb-2 leading-relaxed" {...props} />,
+                                                        ul: ({ node, ...props }) => <ul className="mb-2 space-y-1" {...props} />,
+                                                        li: ({ node, children, ...props }) => {
+                                                            const content = String(children);
+                                                            // Check if it's a checkbox item
+                                                            if (content.trim().match(/^\[ \]|^\[x\]/)) {
+                                                                const isChecked = content.trim().startsWith('[x]');
+                                                                const text = content.replace(/^\[[ x]\]\s*/, '');
+                                                                return (
+                                                                    <li className="flex items-start gap-2" {...props}>
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isChecked}
+                                                                            disabled
+                                                                            className="mt-0.5 flex-shrink-0"
+                                                                        />
+                                                                        <span className="flex-1">{text}</span>
+                                                                    </li>
+                                                                );
+                                                            }
+                                                            return <li className="ml-4" {...props}>{children}</li>;
+                                                        },
+                                                        code: ({ node, className, children, ...props }: any) => {
+                                                            const match = /language-(\w+)/.exec(className || '');
+                                                            const inline = !match;
+                                                            return inline ? (
+                                                                <code className="bg-gray-800 px-1 py-0.5 rounded text-xs font-mono text-blue-300" {...props}>{children}</code>
+                                                            ) : (
+                                                                <code className="block bg-gray-800 p-2 rounded text-xs font-mono overflow-x-auto" {...props}>{children}</code>
                                                             );
-                                                        }
-                                                        return <li className="ml-4" {...props}>{children}</li>;
-                                                    },
-                                                    code: ({ node, className, children, ...props }: any) => {
-                                                        const match = /language-(\w+)/.exec(className || '');
-                                                        const inline = !match;
-                                                        return inline ? (
-                                                            <code className="bg-gray-800 px-1 py-0.5 rounded text-xs font-mono text-blue-300" {...props}>{children}</code>
-                                                        ) : (
-                                                            <code className="block bg-gray-800 p-2 rounded text-xs font-mono overflow-x-auto" {...props}>{children}</code>
-                                                        );
-                                                    },
-                                                    hr: ({ node, ...props }) => <hr className="my-3 border-gray-600" {...props} />,
-                                                    strong: ({ node, ...props }) => <strong className="font-bold text-white" {...props} />,
-                                                    em: ({ node, ...props }) => <em className="italic text-gray-300" {...props} />,
-                                                }}
-                                            >
-                                                {message.content}
-                                            </ReactMarkdown>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <p>{message.content}</p>
-                                )}
-                            </div>
-                        ))}
+                                                        },
+                                                        hr: ({ node, ...props }) => <hr className="my-3 border-gray-600" {...props} />,
+                                                        strong: ({ node, ...props }) => <strong className="font-bold text-white" {...props} />,
+                                                        em: ({ node, ...props }) => <em className="italic text-gray-300" {...props} />,
+                                                    }}
+                                                >
+                                                    {message.content}
+                                                </ReactMarkdown>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p>{message.content}</p>
+                                    )}
+                                </div>
+                            );
+                        })}
                         {isLoading && (
                             <div className="flex items-center gap-2 text-gray-400 text-sm p-2">
                                 <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
@@ -371,6 +415,7 @@ export default function CreateTest() {
                                 onEdit={handleEditCommand}
                                 onDelete={handleDeleteCommand}
                                 onExecute={handleExecuteCommand}
+                                executionResults={executionResultsMap}
                             />
                         ) : (
                             <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-xs font-mono overflow-x-auto">

@@ -8,9 +8,10 @@ interface CommandListProps {
     onDelete?: (index: number) => void;
     onReorder?: (fromIndex: number, toIndex: number) => void;
     onExecute?: (index: number, command: PlaywrightCommand) => Promise<CommandExecutionResult>;
+    executionResults?: Map<number, CommandExecutionResult>;
 }
 
-export function CommandList({ commands, onEdit, onDelete, onReorder, onExecute }: CommandListProps) {
+export function CommandList({ commands, onEdit, onDelete, onReorder, onExecute, executionResults }: CommandListProps) {
     if (commands.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -33,6 +34,7 @@ export function CommandList({ commands, onEdit, onDelete, onReorder, onExecute }
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onExecute={onExecute}
+                    externalExecutionResult={executionResults?.get(index) || null}
                 />
             ))}
         </div>
